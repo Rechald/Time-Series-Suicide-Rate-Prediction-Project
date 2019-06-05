@@ -1,0 +1,74 @@
+
+```{r include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(radiant)
+#install.packages('countrycode')
+library(countrycode)
+library(kableExtra)
+library(gridExtra)
+```
+
+```{r}
+data_all <- read_csv('suicide_rates.csv')[ ,1:12]
+data_all$age <- factor(data_all$age, levels = c('5-14 years', '15-24 years', '25-34 years', 
+                                                   '35-54 years', '55-74 years', '75+ years'))
+data_all$sex <- factor(data_all$sex, levels = c('male', 'female'))
+data_all$continent <- countrycode(sourcevar = data_all$country,
+                                  origin = 'country.name',
+                                  destination = 'continent')
+data_all <- data_all[, -(8:9)]
+data_all <- data_all %>%
+  filter(year < 2016)
+```
+
+The dataset we are using is from kaggle (https://www.kaggle.com/russellyates88/suicide-rates-overview-1985-to-2016) and reports on the number of suicides, as well as the suicide rate per 100 thousand people, for `r length(unique(data_all$country))` countries from 1987 through 2015. The dataset has 12 columns, but two of them have been removed due to irrelevance or incomplete cases, while a new column -- `continent` -- has been added. Each observation of the dataset is a country-year combination that represents a particular demographic, broken down by sex, age, and generation. Let's take a look at 15 random rows from the dataset:
+
+```{r}
+nums <- sample(1:nrow(data_all), 15, replace = T) %>% sort
+kable(data_all[nums, ], 'latex', booktabs = T, align = 'c') %>%
+  kable_styling(latex_options = c("striped", "scale_down"))
+```
+
+The variables, for each annual demographic observation, are as follows:  
+- `country`: the country.  
+- `year`: the year.  
+- `sex`: the sex (male or female).  
+- `age`: the age group (5-14 years; 15-24 years; 25-34 years; 35-54 years; 55-74 years; or 75+ years).  
+- `suicides_no`: the total number of suicides reported.  
+- `population`: the population reported.  
+- `suicides/100k pop`: the suicide rate per 100 thousand people.  
+- `gdp_for_year ($)`: the GDP *for the entire country*; is the same for all observations with the same values for `country` and `year`.  
+- `gdp_per_capita ($)`: the GDP *for the entire country* divided by the full annual population *for the entire country*; is the same for all observations with the same values for `country` and `year`.  
+- `generation`: the generation (Generation X; Silent; G.I. Generation; Boomers; Millenials; or Generation Z).  
+- `continent`: the continent (Africa; Americas (North America + South America); Asia; Europe; or Oceania (Australia, Fiji, Kiribati, and New Zealand)).
+
+```{r}
+str_factor <- c(rep('sex', 2), rep('age', 6), rep('generation', 6), rep('continent', 5))
+str_sex <- c('male', 'female')
+str_age <- c('5-14 years', '15-24 years', '25-34 years', '35-54 years', '55-74 years', '75+ years')
+str_generation <- c('Silent', 'Generation X', 'G.I. Generation', 'Boomers', 'Millenials', 'Generation Z')
+str_continent <- c('Africa', 'Americas', 'Asia', 'Europe', 'Oceania')
+df_prop <- data.frame('Factor Variable' = str_factor,
+                      'Variable Level' = c(str_sex, str_age, str_generation, str_continent),
+                      'Proportion (%)' = 0,
+                      check.names = F)
+for (ii in 1:nrow(df_prop)) {
+  a <- as.character(df_prop$`Factor Variable`[ii])
+  b <- as.character(df_prop$`Variable Level`[ii])
+  prop <- 100*round(mean(data_all[, a] == b), 4)
+  df_prop$`Proportion (%)`[ii] <- prop
+}
+```
+
+```{r}
+kable(df_prop, 'latex', booktabs = T, align = 'c') %>%
+  collapse_rows(columns = 1, latex_hline = "major", valign = "middle") %>%
+  kable_styling(font_size = 7, position = 'float_right')
+```
+
+Since `country` and `year` are essentially just identifiers for each observation, their summary statistics are uninteresting. None of the remaining variables have a particularly interesting mean or standard deviation -- especially not the factor variables (`sex`, `age`, `generation`, and `continent`). What we can look at, though, is the proportion of observations that are represented by each factor level for those four variables, which is represented in the table to the right.
+
+What immediately jumps out from the proportion table is that the data is perfectly split among the sexes and among age groups, which makes it possible to significantly observe both the number of suicides and the suicide rate for all splits of those demographics. Meanwhile, the proportions for `generation` and `continent` are *not* perfectly split across the dataset; alas, given the nature of those variables, this is not a surprise. 
+
+

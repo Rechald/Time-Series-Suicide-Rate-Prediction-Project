@@ -1,0 +1,210 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+fontsize: 9pt
+geometry: margin=0.75in
+---
+```{r include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(radiant)
+install.packages('countrycode')
+library(countrycode)
+```
+
+Let's take a look at the time trends of both the number of suicides, and the suicide rate, in the data.
+
+```{r}
+data_all <- read_csv('suicide_rates.csv')[ ,1:12]
+data_all$age <- factor(data_all$age, levels = c('5-14 years', '15-24 years', '25-34 years', 
+                                                   '35-54 years', '55-74 years', '75+ years'))
+data_all$sex <- factor(data_all$sex, levels = c('male', 'female'))
+data_all$continent <- countrycode(sourcevar = data_all$country,
+                                  origin = 'country.name',
+                                  destination = 'continent')
+data_all <- data_all %>%
+  filter(year < 2016)
+#str(data_all)
+```
+
+### Global Trend
+
+Let's start by taking a look at the global time trend in the number of suicides between 1985 and 2015.
+
+```{r fig.width = 4, fig.height = 2.5}
+data_all %>%
+  group_by(year) %>%
+  summarize(suicides_total = sum(suicides_no),
+            population_total = sum(population),
+            average_per_100 = (100000*suicides_total)/population_total) %>%
+  ggplot(aes(x = year, y = suicides_total)) +
+  geom_line() +
+  labs(title = 'Time Trend of Annual Suicides',
+       x = 'Year',
+       y = 'Total Annual Suicides')
+```
+
+So it seems that total suicides increased somewhat steadily through 2000, but have since decreased a little bit. This all may be something of a product of population change, though, so let's recreate the graph with suicides per 100K people:
+
+```{r fig.width = 4, fig.height = 2.5}
+data_all %>%
+  group_by(year) %>%
+  summarize(suicides_total = sum(suicides_no),
+            population_total = sum(population),
+            average_per_100 = (100000*suicides_total)/population_total) %>%
+  ggplot(aes(x = year, y = average_per_100)) +
+  geom_line() +
+  labs(title = 'Time Trend of Suicides per 100K People',
+       x = 'Year',
+       y = 'Suicides per 100K People')
+```
+
+This graph is actually even more pronouced than the previous graph.
+
+### Continental Trends
+
+Let's now break the data down by continent and see if we can notice anything:
+
+```{r fig.width = 5.1, fig.height = 2.7}
+data_all %>%
+  group_by(year, continent) %>%
+  summarize(suicides_total = sum(suicides_no),
+            population_total = sum(population),
+            average_per_100 = (100000*suicides_total)/population_total) %>%
+  ggplot(aes(x = year, y = suicides_total, color = continent)) +
+  geom_line() +
+  labs(title = 'Time Trend of Annual Suicides',
+       subtitle = 'Facetted by Continent',
+       x = 'Year',
+       y = 'Total Annual Suicides')
+```
+
+The Europe trend closely follows the global trend. Recall from the data overview section, though, that `r format_nr(mean(data_all$continent == 'Europe'), perc = TRUE)` of the observations in the data are European -- so this is not entirely surprising. Let's check to see if this is a function of Europe appearing most frequently in the dataset:
+
+```{r}
+round(prop.table(table(data_all$continent)), 3)
+```
+
+The plurality of observations are from Europe, but there are plenty from the Americas and Asia as well. That said, only a few are from Africa and Oceania. The graph above deals purely with volume, though, so let's recreate it with suicides per 100K people:
+
+```{r fig.width = 5.1, fig.height = 2.7}
+data_all %>%
+  group_by(year, continent) %>%
+  summarize(suicides_total = sum(suicides_no),
+            population_total = sum(population),
+            average_per_100 = (100000*suicides_total)/population_total) %>%
+  ggplot(aes(x = year, y = average_per_100, color = continent)) +
+  geom_line() +
+  labs(title = 'Time Trend of Suicides per 100K People',
+       subtitle = 'Facetted by Continent',
+       x = 'Year',
+       y = 'Suicides per 100K People')
+```
+
+This graph is a little bit more telling. In Europe, the suicide rate increased then peaked in the mid-90's, but has decreased since; in the Americas, Asia, and Oceania, it has stayed fairly steady; and in Africa, it saw a sharp decrease in the mid-90's and has stayed fairly low since.
+
+\newpage
+
+### Country Trends
+
+Now, for the twelve countries with the most total suicides from 1985 through 2015, let's observe the annual trend in both total suicides and the suicide rate.
+
+```{r fig.height = 4.2}
+# create a new dataset that is country-year observations of the total number of suicides 
+# (`suicides_total`) in a country in a given year, and the average number of suicides 
+# per 100k people in a country in a given year
+country_year <- data_all %>%
+  group_by(country, year) %>%
+  summarize(suicides_total = sum(suicides_no),
+            population_total = sum(population),
+            average_per_100 = (100000*suicides_total)/population_total) %>% 
+  arrange(year)
+# countries with the most total suicides
+tops <- country_year %>%
+  group_by(country) %>%
+  summarize(sum = sum(suicides_total)) %>%
+  arrange(desc(sum))
+country_list <- tops$country[1:12]
+# total suicides
+country_year %>%
+  filter(country %in% country_list) %>%
+  ggplot(aes(x = year, y = suicides_total, color = country)) +
+  geom_line() +
+  facet_wrap(~country, scales = 'free_y') +
+  theme(legend.position = 'none') +
+  labs(title = 'Time Trend of Annual Suicides',
+       subtitle = 'Ten countries with the most total suicides from 1985-2016',
+       x = 'Year',
+       y = 'Total Annual Suicides')
+```
+
+```{r}
+# suicides per 100k
+country_year %>%
+  filter(country %in% country_list) %>%
+  ggplot(aes(x = year, y = average_per_100, color = country)) +
+  geom_line() +
+  facet_wrap(~country, scales = 'free_y') +
+  theme(legend.position = 'none') +
+  labs(title = 'Time Trend of Suicides per 100K People',
+       subtitle = 'Ten countries with the most total suicides from 1985-2016',
+       x = 'Year',
+       y = 'Suicides per 100K People')
+```
+
+\newpage
+
+### United States Trend
+
+Now, let's take a more in-depth look at the time trends in the United States by breaking them down based on a few different columns.
+
+```{r fig.width = 5.1, fig.height = 2.7}
+# how does this change for different age groups in a given country?
+data_all %>%
+  filter(country == 'United States') %>%
+  group_by(year, age) %>%
+  summarize(suicides_total = sum(suicides_no),
+            population_total = sum(population),
+            average_per_100 = (100000*suicides_total)/population_total) %>% 
+  arrange(year) %>%
+  ggplot(aes(x = year, y = suicides_total, color = age)) +
+  geom_line() +
+  labs(title = 'Time Trend of Annual Suicides',
+       subtitle = 'In the United States, by age group',
+       x = 'Year',
+       y = 'Total Annual Suicides')
+```
+
+```{r fig.width = 5.1, fig.height = 2.7}
+data_all %>%
+  filter(country == 'United States') %>%
+  group_by(year, sex) %>%
+  summarize(suicides_total = sum(suicides_no),
+            population_total = sum(population),
+            average_per_100 = (100000*suicides_total)/population_total) %>% 
+  arrange(year) %>%
+  ggplot(aes(x = year, y = suicides_total, color = sex)) +
+  geom_line() +
+  labs(title = 'Time Trend of Annual Suicides',
+       subtitle = 'In the United States, by sex',
+       x = 'Year',
+       y = 'Total Annual Suicides')
+```
+
+```{r fig.width = 5.1, fig.height = 2.7}
+data_all %>%
+  filter(country == 'United States') %>%
+  group_by(year, generation) %>%
+  summarize(suicides_total = sum(suicides_no),
+            population_total = sum(population),
+            average_per_100 = (100000*suicides_total)/population_total) %>% 
+  arrange(year) %>%
+  ggplot(aes(x = year, y = suicides_total, color = generation)) +
+  geom_line() +
+  labs(title = 'Time Trend of Annual Suicides',
+       subtitle = 'In the United States, by generation',
+       x = 'Year',
+       y = 'Total Annual Suicides')
+```
+

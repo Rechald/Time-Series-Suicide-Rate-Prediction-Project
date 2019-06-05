@@ -1,0 +1,58 @@
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+## load radiant packages if neededi
+if (!exists("r_environment")) library(radiant)
+```
+
+```{r}
+install.packages('countrycode')
+library(countrycode)
+```
+
+```{r}  
+## read in data
+data<-read.csv("suicide_rates.csv")
+```
+
+```{r}
+data$continent <- countrycode(sourcevar = data$country,
+                                  origin = 'country.name',
+                                  destination = 'continent')
+
+data$age <- factor(data$age, levels = c('5-14 years', '15-24 years', '25-34 years', 
+                                                   '35-54 years', '55-74 years', '75+ years'))
+data$sex <- factor(data$sex, levels = c('male', 'female'))
+data$continent <- countrycode(sourcevar = data$country,
+                                  origin = 'country.name',
+                                  destination = 'continent')
+data <- data %>%
+  filter(year < 2016)
+str(data)
+```
+
+```{r fig.width = 9.15, fig.height = 9.15, dpi = 144}
+result <- correlation(
+  data, 
+  vars = c(
+    "sex", "suicides_no", "population", "suicides.100k.pop", 
+    "gdp_for_year....", "gdp_per_capita....", "continent"
+  )
+)
+summary(result)
+plot(result, nrobs = 1000)
+```
+
+In these resultes, we could see that most of them are significant.
+
+The Pearson correlation between `suicides_no` and `population` is 0.62, which indicates that there is a moderate positive relationship between them. It makes sense because the number of suicides will to some extent increase as the total number of popultation increse. 
+
+However, when we look at the relationsihp between `suicides.100k.pop` and `population`, it shows no linear relationship. The conclusion is that the average suicide rate would not necessarily increase as the population become larger.
+
+
+
+
+
+
+
+
+

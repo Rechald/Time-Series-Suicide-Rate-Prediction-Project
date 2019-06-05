@@ -1,0 +1,187 @@
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+install.packages("countrycode")
+install.packages("tseries")
+library(radiant)
+library(readr)
+library(dplyr)
+library(tidyverse)
+library(countrycode)
+library(tseries)
+```
+
+```{r}
+## load data
+data_all <- read_csv('suicide_rates.csv')[ ,1:12]
+data_all$age <- factor(data_all$age, levels = c('5-14 years', '15-24 years', '25-34 years', 
+                                                   '35-54 years', '55-74 years', '75+ years'))
+data_all$sex <- factor(data_all$sex, levels = c('male', 'female'))
+data_all$continent <- countrycode(sourcevar = data_all$country,
+                                  origin = 'country.name',
+                                  destination = 'continent')
+data_all <- data_all %>%
+    filter(year < 2016)
+
+data_all<-data_all %>% 
+  mutate(millenials=ifelse(generation=="Millenials",1,0),boomers=ifelse(generation=="Boomers",1,0),gi=ifelse(generation=="G.I. Generation",1,0),gx=ifelse(generation=="Generation X",1,0),gz=ifelse(generation=="Generation Z",1,0),silent=ifelse(generation=="Silent",1,0)) %>% 
+  group_by(continent,year) %>% 
+  mutate(millenials_perc=sum(millenials)/n(),boomers_perc=sum(boomers)/n(),gi_perc=sum(gi)/n(),gx_perc=sum(gx)/n(),gz_perc=sum(gz)/n(),silent_perc=sum(silent)/n()) %>% 
+  ungroup()
+```
+
+After the exploratery data analysis, we find that the plot of suicide rate for **Americas**,**Asia** and **Oceania** have a very obvious time trend and may fit better for ARMA models. For starters, we tried some simple linear regressions as baseline models but they didn't work well so we turned to ARMA model on continental average suicide rate.
+
+```{r}
+## suicide rate per continent
+suicide_c <- data_all %>%
+  group_by(continent,year) %>%
+  summarise(suicides_total = sum(suicides_no),
+            population_total = sum(population),
+            average_per_100 = (100000*suicides_total)/population_total,
+            gdp_per=mean(`gdp_per_capita ($)`),
+            mill_per=mean(millenials_perc),
+            boomers_per=mean(boomers_perc),
+            gi_per=mean(gi_perc),
+            gx_per=mean(gx_perc),
+            gz_per=mean(gz_perc),
+            silent_per=mean(silent_perc))%>%
+  select(continent, year, average_per_100,gdp_per,mill_per,boomers_per,gi_per,gx_per,gz_per,silent_per)
+```
+
+
+```{r}
+Americas<-suicide_c %>% 
+  filter(continent=="Americas")
+Asia<-suicide_c %>% 
+  filter(continent=="Asia")
+Oceania<-suicide_c %>% 
+  filter(continent=="Oceania")
+```
+
+To find the best ARMA model for each continent, we estimate ARMA models with different specifications and find the one that give us the lowest AIC. Besides, we also try to include variables like "gdp per catipa" and "percentage of Millenials" by using "xreg", and we the compare the AIC value as well as how well the model fits with and without xreg to see whether we should include it.
+
+
+
+ARMA model for **Asia**
+
+```{r}
+## best Asia ARMA model
+p=5
+q=4
+model_Asia = arima(Asia$average_per_100,order = c(p,0,q))
+model_Asia
+informationCriteria1 = matrix(c(AIC(model_Asia),BIC(model_Asia)),1,2)
+eHat_Asia = model_Asia$residuals
+```
+
+Here, we chose 5 as the maximum order for the autoregressive model and 4 as the maximum oder for moving average model.
+
+After getting the best model, we are then going to predict our data and plot them against the real data to see how well our model fit the data.
+
+```{r}
+## in sampel fit
+fit_Asia <- Asia$average_per_100 - eHat_Asia
+plot<-data.frame(Asia$average_per_100,fit_Asia,Asia$year)
+fit_plot <-plot %>% 
+  ggplot(aes(x = Asia.year)) + 
+  geom_line(aes(y = Asia.average_per_100, color = 'Asia.average_per_100')) + 
+  geom_line(aes(y = fit_Asia, color = 'fit_Asia')) +
+  labs(title = 'Asia',
+       subtitle = 'Actual values vs. ARIMA(5, 4) values', 
+       x = 'Time')
+fit_plot
+```
+
+This is a very good model because the fitted values are very close to our original data, which means they capture the trend to a large extent.  
+Then, we would like to do an our of sample forcast using this model to predict the suicide rate for the following three years in Asia.
+
+```{r}
+## conduct out of sample forecast for three years
+predict(model_Asia,3)
+```
+
+
+ARMA model for **Oceania**
+
+```{r}
+## best Oceania ARMA model
+p=1
+q=0
+model_Oceania = arima(Oceania$average_per_100,order = c(p,0,q))
+model_Oceania
+informationCriteria1 = matrix(c(AIC(model_Oceania),BIC(model_Oceania)),1,2)
+eHat_Oceania = model_Oceania$residuals
+```
+Here, we chose 1 as the maximum order for the autoregressive model and 0 as the maximum oder for moving average model.
+
+```{r}
+## in sampel fit
+fit_Oceania <- Oceania$average_per_100 - eHat_Oceania
+plot<-data.frame(Oceania_average_per_100=Oceania$average_per_100[-length(Oceania$average_per_100)],fit_Oceania=fit_Oceania[-1],Oceania$year[-1])
+fit_plot <-plot %>% 
+  ggplot(aes(x = Oceania.year..1.)) + 
+  geom_line(aes(y = Oceania_average_per_100, color = 'Oceania_average_per_100')) + 
+  geom_line(aes(y = fit_Oceania, color = 'fit_Oceania')) +
+  labs(title = 'Oceania',
+       subtitle = 'Actual values vs. ARIMA(1, 0) values', 
+       x = 'Time')
+fit_plot
+```
+
+Looking at the plot, the model of Oceania even fitts better than the model of Asia.
+
+The 3 years' predicted value for suicide rate in Oceania are calculated as below.
+```{r}
+## conduct out of sample forecast for three years
+predict(model_Oceania,3)
+```
+
+
+ARMA model for **Americas**
+
+```{r}
+## best Americas ARMA model
+p=2
+q=1
+y = Americas$average_per_100
+X_all = cbind(Americas$gdp_per,Americas$mill_per)
+model_Americas_n = arima(y,xreg=X_all,order = c(p,0,q))
+model_Americas_n
+informationCriteria1 = matrix(c(AIC(model_Americas_n),BIC(model_Americas_n)),1,2)
+eHat_Americas = model_Americas_n$residuals
+```
+
+Here, we chose 2 as the maximum order for the autoregressive model and 1 as the maximum oder for moving average model and we also include "gdp per capita" and "percentage of Millenias" as our explanatory variables.
+
+```{r}
+## in sampel fit
+fit_Americas <- Americas$average_per_100 - eHat_Americas
+plot<-data.frame(Americas$average_per_100,fit_Americas,Americas$year)
+fit_plot <-plot %>% 
+  ggplot(aes(x = Americas.year)) + 
+  geom_line(aes(y = Americas.average_per_100, color = 'Americas.average_per_100')) + 
+  geom_line(aes(y = fit_Americas, color = 'fit_Americas')) +
+  labs(title = 'Americas',
+       subtitle = 'Actual values vs. ARIMA(2, 1) values', 
+       x = 'Time')
+fit_plot
+```
+
+The ARMA model for America shows a lag on the actual values, which means that our fitted values is a little bit ahead of the actual value. But their trends are basically the same.
+
+But since we don't have gdp and percentage of Millenias value for the next 3 years, we end up using just a simple ARMA model for the out-of-sample prediction which is shown as below.
+
+```{r}
+## best Americas ARMA model (no x_reg)
+p=2
+q=1
+model_Americas = arima(y,order = c(p,0,q),method="ML")
+model_Americas
+```
+
+```{r}
+## conduct out of sample forecast for three years (since we don't have data after 2015 for millenias and gdp in this data, we end up using an ARMA model without xreg to conduct out_of_sample prediction)
+predict(model_Americas,3)
+```
+

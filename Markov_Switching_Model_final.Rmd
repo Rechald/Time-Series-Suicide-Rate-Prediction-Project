@@ -1,0 +1,383 @@
+---
+title: "Markov Switching Model"
+date: "3/9/2019"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+install.packages('countrycode')
+install.packages("MSwM")
+library(radiant)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(countrycode)
+library(tseries)
+library(broom)
+library(knitr)
+library(MSwM)
+```
+
+
+```{r}
+## load data
+data_all <- read_csv('suicide_rates.csv')[ ,1:12]
+data_all$age <- factor(data_all$age, levels = c('5-14 years', '15-24 years', '25-34 years', 
+                                                   '35-54 years', '55-74 years', '75+ years'))
+data_all$sex <- factor(data_all$sex, levels = c('male', 'female'))
+data_all$continent <- countrycode(sourcevar = data_all$country,
+                                  origin = 'country.name',
+                                  destination = 'continent')
+data_all <- data_all %>%
+  filter(year < 2016)
+
+
+## suicide rate per continent
+suicide_c <- data_all %>%
+  group_by(continent,year) %>%
+  summarise(suicides_total = sum(suicides_no),
+            population_total = sum(population),
+            average_per_100 = (100000*suicides_total)/population_total) %>%
+  select(continent, year, average_per_100)
+
+
+## gdp per capita for each continent
+gdp_c <- data_all %>%
+  group_by(continent,year) %>%
+  summarise(gdp_total = sum(`gdp_for_year ($)`),
+            population_total = sum(population),
+            gdp_pc = log(gdp_total/population_total)) %>%
+  select(continent, year, gdp_pc)
+
+
+## percentage of Millenials for each continent
+m_c <- data_all %>%
+  mutate(Millenials = ifelse(generation == "Millenials",1,0)) %>%
+  group_by(continent,year) %>%
+  summarise(population_total = sum(population), mill_total = sum(population*Millenials)) %>%
+  ungroup() %>%
+  mutate(pc_mill = mill_total/population_total) %>%
+  select(continent, year, pc_mill)
+
+
+## combine suicide data with gdp per capita
+c_data <- cbind.data.frame(suicide_c,gdp_c,m_c)
+c_data <- c_data[,-c(4,5,7,8)]
+```
+## Motivation to Use Markov Switching Model for Suicide Rate Prediction in Europe and Africa
+
+From the exploratory data analysis part, we observe that there exist obvious time-varying trends in the time series of suicide rate in Europe and Africa, with some periods stable while other quite varied. Therefore, we decided to use two-state Markov Switching model to capture this unique switching characteristic and managed to locate the hidden states of the time series, which assists us in producing predictions that outperform those produced by ARMA models.
+
+
+## Model Selection
+
+In order to select the best model to forecast suicide rate in Europe and Africa, we compare the performance of two different ways of treating conditional means: one method is to treat the mean as a linear regression on various explanatory variables; the other way is to treat it as an autoregressive process including the same set of predictors. The initial model selection adopts approaches of AIC and BIC. Below are AIC and BIC tables for Europe and Africa respectively.
+
+```{r}
+## filter for Europe data
+Europe <- c_data %>%
+  filter(continent == "Europe")
+
+Info_EU <- matrix(0,8,3)
+
+## Try to find the best model to forecast suicide rate in Europe in terms of AIC, BIC and Loglikelihood.
+
+## Model 1: treat the mean as a constant
+olsEuro_c <- lm(average_per_100 ~ 1, data = Europe)
+msEuro_c = msmFit(olsEuro_c, k = 2, sw = rep(TRUE, 2))
+Info_EU[1,] <- c(AIC(msEuro_c@model),BIC(msEuro_c@model),msEuro_c@Fit@logLikel)
+
+## Model 2: treat the mean as a linear regression whose independent variable is gdp_pc
+olsEuro_lm1 <- lm(average_per_100 ~ gdp_pc, data = Europe)
+msEuro_lm1 = msmFit(olsEuro_lm1, k = 2, sw = rep(TRUE, 3))
+Info_EU[2,] <- c(AIC(msEuro_lm1@model),BIC(msEuro_lm1@model),msEuro_lm1@Fit@logLikel)
+
+## Model 3: treat the mean as a linear regression whose independent variable is pc_mill
+olsEuro_lm2 <- lm(average_per_100 ~ pc_mill, data = Europe)
+msEuro_lm2 = msmFit(olsEuro_lm2, k = 2, sw = rep(TRUE, 3))
+Info_EU[3,] <- c(AIC(msEuro_lm2@model),BIC(msEuro_lm2@model),msEuro_lm2@Fit@logLikel)
+
+## Model 4: treat the mean as a linear regression whose independent variables are gdp_pc and pc_mill
+olsEuro_lm12 <- lm(average_per_100 ~ gdp_pc + pc_mill, data = Europe)
+msEuro_lm12 = msmFit(olsEuro_lm12, k = 2, sw = rep(TRUE, 4))
+Info_EU[4,] <- c(AIC(msEuro_lm12@model),BIC(msEuro_lm12@model),msEuro_lm12@Fit@logLikel)
+
+## Model 5: estimate Markov AR(1) Switching model with no exogenous variable
+Euro_ar <- lm(average_per_100 ~ 1, data = Europe)
+msEuro_ar = msmFit(Euro_ar, k = 2, p = 1, sw = rep(TRUE, 3), control = list(parallel = FALSE))
+Info_EU[5,] <- c(AIC(msEuro_ar@model),BIC(msEuro_ar@model),msEuro_ar@Fit@logLikel)
+
+## Model 6: estimate Markov AR(1) Switching model with "gdp_pc" as the only exogenous variable
+Euro_ar1 <- lm(average_per_100 ~ gdp_pc, data = Europe)
+msEuro_ar1 = msmFit(Euro_ar1, k = 2, p = 1, sw = rep(TRUE, 4), control = list(parallel = FALSE))
+Info_EU[6,] <- c(AIC(msEuro_ar1@model),BIC(msEuro_ar1@model),msEuro_ar1@Fit@logLikel)
+
+## Model 7: estimate Markov AR(1) Switching model with "pc_mill" as the only exogenous variable
+Euro_ar2 <- lm(average_per_100 ~ pc_mill, data = Europe)
+msEuro_ar2 = msmFit(Euro_ar2, k = 2, p = 1, sw = rep(TRUE, 4), control = list(parallel = FALSE))
+Info_EU[7,] <- c(AIC(msEuro_ar2@model),BIC(msEuro_ar2@model),msEuro_ar2@Fit@logLikel)
+
+## Model 8: estimate Markov AR(1) Switching model with "gdp_pc" and "pc_mill" as exogenous variables
+Euro_ar12 <- lm(average_per_100 ~ gdp_pc + pc_mill, data = Europe)
+msEuro_ar12 = msmFit(Euro_ar12, k = 2, p = 1, sw = rep(TRUE, 5), control = list(parallel = FALSE))
+Info_EU[8,] <- c(AIC(msEuro_ar12@model),BIC(msEuro_ar12@model),msEuro_ar12@Fit@logLikel)
+
+Info_EU <- as.data.frame(Info_EU)
+rownames(Info_EU) <- c("Lm Constant", "Lm gdp_pc", "Lm pc_mill", "Lm Both","AR Constant", "AR gdp_pc", "AR pc_mill", "AR Both")
+colnames(Info_EU) <- c("AIC", "BIC", "Loglik")
+Info_EU
+```
+
+```{r}
+## filter for Africa data
+Africa <- c_data %>%
+  filter(continent == "Africa")
+
+Info_Afri <- matrix(0,8,3)
+
+## Try to find the best model to forecast suicide rate in Europe in terms of AIC, BIC and Loglikelihood.
+
+## Model 1: treat the mean as a constant
+olsAfri_c <- lm(average_per_100 ~ 1, data = Africa)
+msAfri_c = msmFit(olsAfri_c, k = 2, sw = rep(TRUE, 2))
+Info_Afri[1,] <- c(AIC(msAfri_c@model),BIC(msAfri_c@model),msAfri_c@Fit@logLikel)
+
+## Model 2: treat the mean as a linear regression whose independent variable is gdp_pc
+olsAfri_lm1 <- lm(average_per_100 ~ gdp_pc, data = Africa)
+msAfri_lm1 = msmFit(olsAfri_lm1, k = 2, sw = rep(TRUE, 3))
+Info_Afri[2,] <- c(AIC(msAfri_lm1@model),BIC(msAfri_lm1@model),msAfri_lm1@Fit@logLikel)
+
+## Model 3: treat the mean as a linear regression whose independent variable is pc_mill
+olsAfri_lm2 <- lm(average_per_100 ~ pc_mill, data = Africa)
+msAfri_lm2 = msmFit(olsAfri_lm2, k = 2, sw = rep(TRUE, 3))
+Info_Afri[3,] <- c(AIC(msAfri_lm2@model),BIC(msAfri_lm2@model),msAfri_lm2@Fit@logLikel)
+
+## Model 4: treat the mean as a linear regression whose independent variables are gdp_pc and pc_mill
+olsAfri_lm12 <- lm(average_per_100 ~ gdp_pc + pc_mill, data = Africa)
+msAfri_lm12 = msmFit(olsAfri_lm12, k = 2, sw = rep(TRUE, 4))
+Info_Afri[4,] <- c(AIC(msAfri_lm12@model),BIC(msAfri_lm12@model),msAfri_lm12@Fit@logLikel)
+
+## Model 5: estimate Markov AR(1) Switching model with no exogenous variable
+Afri_ar <- lm(average_per_100 ~ 1, data = Africa)
+msAfri_ar = msmFit(Afri_ar, k = 2, p = 1, sw = rep(TRUE, 3), control = list(parallel = FALSE))
+Info_Afri[5,] <- c(AIC(msAfri_ar@model),BIC(msAfri_ar@model),msAfri_ar@Fit@logLikel)
+
+## Model 6: estimate Markov AR(1) Switching model with "gdp_pc" as the only exogenous variable
+Afri_ar1 <- lm(average_per_100 ~ gdp_pc, data = Africa)
+msAfri_ar1 = msmFit(Afri_ar1, k = 2, p = 1, sw = rep(TRUE, 4), control = list(parallel = FALSE))
+Info_Afri[6,] <- c(AIC(msAfri_ar1@model),BIC(msAfri_ar1@model),msAfri_ar1@Fit@logLikel)
+
+## Model 7: estimate Markov AR(1) Switching model with "pc_mill" as the only exogenous variable
+Afri_ar2 <- lm(average_per_100 ~ pc_mill, data = Africa)
+msAfri_ar2 = msmFit(Afri_ar2, k = 2, p = 1, sw = rep(TRUE, 4), control = list(parallel = FALSE))
+Info_Afri[7,] <- c(AIC(msAfri_ar2@model),BIC(msAfri_ar2@model),msAfri_ar2@Fit@logLikel)
+
+## Model 8: estimate Markov AR(1) Switching model with "gdp_pc" and "pc_mill" as exogenous variables
+Afri_ar12 <- lm(average_per_100 ~ gdp_pc + pc_mill, data = Africa)
+msAfri_ar12 = msmFit(Afri_ar12, k = 2, p = 1, sw = rep(TRUE, 5), control = list(parallel = FALSE))
+Info_Afri[8,] <- c(AIC(msAfri_ar12@model),BIC(msAfri_ar12@model),msAfri_ar12@Fit@logLikel)
+
+Info_Afri <- as.data.frame(Info_Afri)
+rownames(Info_Afri) <- c("Lm Constant", "Lm gdp_pc", "Lm pc_mill", "Lm Both","AR Constant", "AR gdp_pc", "AR pc_mill", "AR Both")
+colnames(Info_Afri) <- c("AIC", "BIC", "Loglik")
+Info_Afri
+```
+As can be seen from the information criteria tables above, treating the conditional means of suicide rate as a autoregressive process generally works better for both Europe and Africa than treating it as a linear process. Therefore, we decided to incorporate GDP per capita and Millenials percentage into our models and compare their performance according to in-sample MSEs. Finally, we choose the markov autoregressive model with the lowest MSE as our final one to predict out-of-sample suicide rates for Europe and Africa.
+
+The MSEs of 4 distinguishly specified models for Europe and Africa are represent in the following table:
+
+```{r}
+## MSEs of Markov autoregressive models for Europe and Africa
+MSE <- matrix(0,4,2)
+Euro_model <- c(msEuro_ar, msEuro_ar1, msEuro_ar2, msEuro_ar12)
+Africa_model <- c(msAfri_ar, msAfri_ar1, msAfri_ar2, msAfri_ar12)
+
+for(i in 1:4){
+  for(j in 1:2){
+    if(j == 1){
+      fit <- as.numeric(rowSums(Euro_model[[i]]@Fit@CondMean*Euro_model[[i]]@Fit@filtProb))
+      actual <- Europe$average_per_100[-1]
+      MSE[i,j] <- sum((actual - fit)^2)/30
+    }
+    else{
+      fit <- as.numeric(rowSums(Africa_model[[i]]@Fit@CondMean*Africa_model[[i]]@Fit@filtProb))
+      actual <- Africa$average_per_100[-1]
+      MSE[i,j] <- sum((actual - fit)^2)/30
+    }
+  }
+}
+
+colnames(MSE) <- c("Europe", "Africa")
+rownames(MSE) <- c("AR Constant", "AR GDP Per Capita", "AR Millenials Percentage", "AR Both")
+MSE
+```
+
+Since incorporating GDP per capita and Millenials Percentage into our models does help us predict suicide rate as the MSEs of kitchensink markov switching models are lowest for both Europe and Africa(0.0866 and 0.2771 respectively), we decided to choose them as the final models to make out-of sample forecasts. However, before we continue our analysis, we have to present the state-switching characteristic of the original time series and implement residuals analysis to check if the models are mis-specified or not. Related analyses are shown below.
+
+## Model Diagnosis for Europe
+
+The summary for Markov autoregressive model used to predict suicide rate in Europe is as follows:
+
+```{r}
+summary(msEuro_ar12)
+```
+The transition probabilities matrix shows that the probability of regime 1 still staying in the same state next period given all current information is 0.78 while the probability for regime 2 is 0.57. As a result, we can name regime 1 as highly persistent state and regime 2 as randomly switching state. The two plots below present the smoothed and filtered probability of each time t being in the two states over the entire observation period from 1986 to 2015.
+
+```{r}
+## state probability
+par(mar=c(2,3,3,2))
+plotProb(msEuro_ar12, which=1)
+```
+
+```{r}
+## state probability
+par(mar=c(2,3,3,2))
+plotProb(msEuro_ar12, which=2)
+```
+Next, we do residuals analysis to examine the distribution of residuals from regime 1 and regime 2, as well as check if there exists autocorrelation in redisuals.
+
+```{r}
+## plot residuals
+par(mar=c(2,3,3,2))
+plot(msEuro_ar12)
+```
+
+```{r}
+## Normal Q-Q plot for Europe
+par(mar=c(2,3,3,2))
+plotDiag(msEuro_ar12,which = 2)
+```
+
+```{r}
+## residuals analysis for Europe
+par(mar=c(2,3,3,2))
+plotDiag(msEuro_ar12,which = 3)
+```
+We can see it from the pooled residuals plots that the residuals are scattered around 0 with an approximately normal distribution and a decent normal Q-Q. Correlation plots indicate no significant autocorrelation in residuals between different time periods, which validates the fact that our model for Europe is reasonably specified.
+
+## Plot Fitted Values against Actual Values from 1986 to 2015
+
+Before conducting out-of-sample forecasts, we plot the values fitted by markov switching model against the acutal suicide rates in Europe from 1986 to 2015 to see if it has a satisfying in-sample performance. As can be seen in the following plot, the model succeeds in capturing the time-varying trends between different states over the entire time period as it fits pretty well to the real-world observations. 
+
+```{r}
+## plot fitted values against actual values for Europe
+fit_Euro <- as.numeric(rowSums(msEuro_ar12@Fit@CondMean*msEuro_ar12@Fit@filtProb))
+act_Euro <- Europe$average_per_100[-1]
+year <- Europe$year[-1]
+plot.Euro <- tibble(year,act_Euro,fit_Euro) %>%
+  gather(key = "type", value = "value",-year)
+ggplot(plot.Euro, aes(x = year, y = value, color = type)) + geom_line() + ylab("Number of Suicide per 100k")
+```
+
+## Out-of-sample Forecast about Suicide Rate in Europe in 2016
+
+Ultimately, we are enabled to make out-of-sample forecast give all information abovementioned. In this case, we managed to predict the number of suicide cases per 100k in Europe in 2016 using the following formula:
+
+E(μ|Ιt) = E(μ1t+1|t) * P(St+1 = 1|It) + E(μ2t+1|t) * P(St+1 = 2|It)
+
+P(St+1 = 1|It) = P(St = 1) * P11 + P(St = 2) * (1 - P22)
+
+P(St+1 = 2|It) = P(St = 1) * (1 - P11) + P(St = 2) * P22
+
+E(μ1t+1|t) = fs=1t+1|t, E(μ2t+1|t) = fs=2t+1|t
+
+The probability of being in regime 1 in 2015 is 0.4402 and being in regime 2 in 2015 is 0.5598. Since P11 is 0.7869 and P22 is 0.5714, the probability distribution of the two states in 2016 is shown in the following table:
+
+```{r}
+P1 <- 0.4402
+P2 <- 1 - P1
+P11 <- 0.7869
+P22 <- 0.5714
+P1_new = P1 * P11 + P2 * (1 - P22)
+P2_new = P1 * (1 - P11) + P2 * P22
+E1 <- 0.9377*13.5416
+E2 <- 0.8628*13.5416
+f2016 <- P1_new*E1 + P2_new*E2
+F_Euro <- tibble(P1_new,P2_new,E1,E2,f2016)
+
+colnames(F_Euro) <- c("P(state 1)", "P(state 2)", "E(state 1)", "E(state 2)", "Forecast 2016")
+F_Euro
+```
+Hence, the number of suicides per 100k in Europe is projected to be 12.27838 in 2016.
+
+## Model Diagnosis for Africa
+
+Again, the summary for Markov autoregressive model used to predict suicide rate in Africa is as follows:
+
+```{r}
+summary(msAfri_ar12)
+```
+
+The transition probabilities matrix shows that the probability of regime 1 still staying in the same state next period given all current information is 0.83 while the probability for regime 2 is 0.92. Both states are highly persistent. The two plots below present the smoothed and filtered probability of each time t being in the two states over the entire observation period from 1986 to 2015.
+
+```{r}
+## state probability
+par(mar=c(2,3,3,2))
+plotProb(msAfri_ar12, which=1)
+```
+
+```{r}
+## state probability
+par(mar=c(2,3,3,2))
+plotProb(msAfri_ar12, which=2)
+```
+
+Next, we do residuals analysis to examine the distribution of residuals from regime 1 and regime 2, as well as check if there exists autocorrelation in redisuals.
+
+```{r}
+## plot residuals
+par(mar=c(2,3,3,2))
+plot(msAfri_ar12)
+```
+
+```{r}
+## Normal Q-Q plot for Africa
+par(mar=c(2,3,3,2))
+plotDiag(msAfri_ar12,which = 2)
+```
+
+```{r}
+## residuals analysis for Africa
+par(mar=c(2,3,3,2))
+plotDiag(msAfri_ar12,which = 3)
+```
+The autocorrelation plots indicate that there might exist some correlation between et and et-1, yet it does not affect the model's in-sample performance to a great extent. The fitted suicide rate is plotted in the following chart.
+
+```{r}
+## plot fitted values against actual values for Africa
+fit_Afri <- as.numeric(rowSums(msAfri_ar12@Fit@CondMean*msAfri_ar12@Fit@filtProb))
+act_Afri <- Africa$average_per_100[-1]
+year <- Africa$year[-1]
+plot.Afri <- tibble(year,act_Afri,fit_Afri) %>%
+  gather(key = "type", value = "value",-year)
+ggplot(plot.Afri, aes(x = year, y = value, color = type)) + geom_line() + ylab("Number of Suicide per 100k")
+```
+
+## Out-of-sample Forecast about Suicide Rate in Africa in 2016
+
+Just like what we have done in the forecasting part for Europe, we utilize the formula again and predict the number of suicide cases for Africa in 2016. In this case, the probability of being in regime 1 in 2015 is almost 1 and being in regime 2 in 2015 is almost 0. Since the two states are quite persistent(P11 = 0.9167, P22 = 0.8333), the number of suicide cases in Africa in 2016 is estimated to be 1.018785 per 100k.
+
+```{r}
+P1 <- 1
+P2 <- 1 - P1
+P11 <- 0.9167
+P22 <- 0.8333
+P1_new = P1 * P11 + P2 * (1 - P22)
+P2_new = P1 * (1 - P11) + P2 * P22
+E1 <- 0.9627*1.1658
+E2 <- (-0.1034)*1.1658
+f2016 <- P1_new*E1 + P2_new*E2
+F_Africa <- tibble(P1_new,P2_new,E1,E2,f2016)
+
+colnames(F_Africa) <- c("P(state 1)", "P(state 2)", "E(state 1)", "E(state 2)", "Forecast 2016")
+F_Africa
+```
+
+## Conclusions
+
+1. According to the out-of-sample forecast results, the number of suicide cases in Europe in 2016 is expected to be 12.27838, which drops by 9.33% compared to that in 2015. As for Africa, the number of suicide cases is expected to be 1.018785, which also drops by 12.61% compared to that in 2015.
+
+2. The situations of people committing suicide are in different states for Europe and Africa. While Africa is expected to remain in a highly persistent state from 2015 to the future, Europe has a vague current hidden state, with a probability of 0.4402 to be in a highly persistent state and a probability of 0.5598 to be in a random switching state. Thus, the out-of-sample forecast will be less certain for Europe than for Africa.

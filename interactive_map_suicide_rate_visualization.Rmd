@@ -1,0 +1,262 @@
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(leaflet)
+library(dplyr)
+library(tidyverse)
+library(viridis)
+library(countrycode)
+```
+
+```{r}
+## read in data
+data<-read.csv("suicide_rates.csv")
+```
+
+```{r}
+# match country with continent
+data$continent <- countrycode(sourcevar = data[, "country"],
+                            origin = "country.name",
+                            destination = "continent")
+```
+
+```{r}
+## explore data
+table(data$continent)
+length(unique(data$country))
+```
+
+```{r}
+## add latitude and longitude to data
+position<-read.csv("Country.csv")
+data<-position %>% 
+  select(Country,Latitude..average.,Longitude..average.) %>% 
+  right_join(data,by=c("Country"="country"))
+data$latitude<-data$Latitude..average.
+data$longitude<-data$Longitude..average.
+```
+```{r}
+datan<-data %>% 
+  select(Country,year,suicides_no,suicides.100k.pop,population,latitude,longitude,continent,country.year) %>% 
+  group_by(country.year) %>% 
+  mutate(num_suicides=sum(suicides_no),unit_suicides=sum(suicides.100k.pop),num_population=sum(population)) %>%
+  select(Country,year,num_suicides,unit_suicides,num_population,continent,country.year)
+datan<-unique(datan)
+```
+
+```{r}
+# Download .shp file on the web:
+#download.file("http://thematicmapping.org/downloads/TM_WORLD_BORDERS_SIMPL-0.3.zip" , destfile="world_shape_file.zip")
+#system("unzip world_shape_file.zip")
+ 
+# Read the file with the rgdal library in R
+library(rgdal)
+world_spdf=readOGR( dsn= getwd() , layer="TM_WORLD_BORDERS_SIMPL-0.3")
+```
+```{r}
+# creat shape
+shape<-world_spdf
+shape1985 <- world_spdf
+shape1990 <- world_spdf
+shape1995 <- world_spdf
+shape2000 <- world_spdf
+shape2005 <- world_spdf
+shape2010 <- world_spdf
+shape2015 <- world_spdf
+shape2016 <- world_spdf
+
+# get shape data
+shape@data <- left_join(shape@data, datan, by = c('NAME' = 'Country') )
+shape1985@data <- left_join(shape1985@data,filter(datan, year == 1985), by = c('NAME'='Country' ) )
+shape1990@data <- left_join(shape1990@data, filter(datan, year == 1990), by = c('NAME' = 'Country') )
+shape1995@data <- left_join(shape1995@data, filter(datan, year == 1995), by = c('NAME' = 'Country') )
+shape2000@data <- left_join(shape2000@data, filter(datan, year == 2000), by = c('NAME' = 'Country') )
+shape2005@data <- left_join(shape2005@data, filter(datan, year == 2005), by = c('NAME' = 'Country') )
+shape2010@data <- left_join(shape2010@data, filter(datan, year == 2010), by = c('NAME' = 'Country') )
+shape2015@data <- left_join(shape2015@data, filter(datan, year == 2015), by = c('NAME' = 'Country') )
+shape2016@data <- left_join(shape2016@data, filter(datan, year == 2016), by = c('NAME' = 'Country') )
+
+
+#shape@data[is.na(shape@data)] <- 0
+#shape1985@data[is.na(shape1985@data)] <- 0
+#shape1990@data[is.na(shape1990@data)] <- 0
+#shape1995@data[is.na(shape1995@data)] <- 0
+#shape2000@data[is.na(shape2000@data)] <- 0
+#shape2005@data[is.na(shape2005@data)] <- 0
+#shape2010@data[is.na(shape2010@data)] <- 0
+#shape2015@data[is.na(shape2015@data)] <- 0
+#shape2016@data[is.na(shape2016@data)] <- 0
+```
+
+```{r}
+# Create a color palette with handmade bins.
+mybins=c(0,50,100,150,200,300,600)
+mypalette= colorBin( palette="YlOrBr", domain=shape@data$unit_suicides, na.color="transparent", bins=mybins)
+mypalette1985 = colorBin( palette="YlOrBr", domain=shape1985@data$unit_suicides, na.color="transparent", bins=mybins)
+mypalette1990 = colorBin( palette="YlOrBr", domain=shape1990@data$unit_suicides, na.color="transparent", bins=mybins)
+mypalette1995 = colorBin( palette="YlOrBr", domain=shape1995@data$unit_suicides, na.color="transparent", bins=mybins)
+mypalette2000 = colorBin( palette="YlOrBr", domain=shape2000@data$unit_suicides, na.color="transparent", bins=mybins)
+mypalette2005 = colorBin( palette="YlOrBr", domain=shape2005@data$unit_suicides, na.color="transparent", bins=mybins)
+mypalette2010 = colorBin( palette="YlOrBr", domain=shape2010@data$unit_suicides, na.color="transparent", bins=mybins)
+mypalette2015 = colorBin( palette="YlOrBr", domain=shape2015@data$unit_suicides, na.color="transparent", bins=mybins)
+mypalette2016 = colorBin( palette="YlOrBr", domain=shape2016@data$unit_suicides, na.color="transparent", bins=mybins)
+```
+
+
+```{r}
+# Prepar the text for the tooltip:
+mytext=paste("Country: ", shape@data$NAME,"<br/>", "Suicides_rate: ", shape@data$unit_suicides,"<br/>", "Population: ",shape@data$num_population, "<br/>", "Suicides_number: ", shape@data$num_suicides) %>% 
+  lapply(htmltools::HTML)
+
+mytext1985=paste("Country: ", shape1985@data$NAME,"<br/>", "Suicides_rate: ", shape1985@data$unit_suicides,"<br/>", "Population: ",shape1985@data$num_population, "<br/>", "Suicides_number: ", shape1985@data$num_suicides) %>% 
+  lapply(htmltools::HTML)
+
+mytext1990=paste("Country: ", shape1990@data$NAME,"<br/>", "Suicides_rate: ", shape1990@data$unit_suicides,"<br/>", "Population: ",shape1990@data$num_population, "<br/>", "Suicides_number: ", shape1990@data$num_suicides) %>% 
+  lapply(htmltools::HTML)
+
+mytext1995=paste("Country: ", shape1995@data$NAME,"<br/>", "Suicides_rate: ", shape1995@data$unit_suicides,"<br/>", "Population: ",shape1995@data$num_population, "<br/>", "Suicides_number: ", shape1995@data$num_suicides) %>% 
+  lapply(htmltools::HTML)
+
+mytext2000=paste("Country: ", shape2000@data$NAME,"<br/>", "Suicides_rate: ", shape2000@data$unit_suicides,"<br/>", "Population: ",shape2000@data$num_population, "<br/>", "Suicides_number: ", shape2000@data$num_suicides) %>% 
+  lapply(htmltools::HTML)
+
+mytext2005=paste("Country: ", shape2005@data$NAME,"<br/>", "Suicides_rate: ", shape2005@data$unit_suicides,"<br/>", "Population: ",shape2005@data$num_population, "<br/>", "Suicides_number: ", shape2005@data$num_suicides) %>% 
+  lapply(htmltools::HTML)
+
+mytext2010=paste("Country: ", shape2010@data$NAME,"<br/>", "Suicides_rate: ", shape2010@data$unit_suicides,"<br/>", "Population: ",shape2010@data$num_population, "<br/>", "Suicides_number: ", shape2010@data$num_suicides) %>% 
+  lapply(htmltools::HTML)
+
+mytext2015=paste("Country: ", shape2015@data$NAME,"<br/>", "Suicides_rate: ", shape2015@data$unit_suicides,"<br/>", "Population: ",shape2015@data$num_population, "<br/>", "Suicides_number: ", shape2015@data$num_suicides) %>% 
+  lapply(htmltools::HTML)
+
+mytext2016=paste("Country: ", shape2016@data$NAME,"<br/>", "Suicides_rate: ", shape2016@data$unit_suicides,"<br/>", "Population: ",shape2016@data$num_population, "<br/>", "Suicides_number: ", shape2016@data$num_suicides) %>% 
+  lapply(htmltools::HTML)
+```
+
+
+
+```{r}
+m<-leaflet(shape) %>% 
+  addTiles() %>%
+  addProviderTiles(providers$Esri) %>%
+  #addProviderTiles("1990",group = "1990") %>% 
+  #addProviderTiles("1995",group="1995") %>% 
+  #addProviderTiles("2000",group="2000") %>% 
+  #addProviderTiles("2005",group="2005") %>% 
+  #addProviderTiles("2010",group="2010") %>% 
+  #addProviderTiles("2015",group="2015") %>% 
+  setView(10, 0, 2) %>%
+  addPolygons(data=shape1985,
+              weight=1,
+              fillColor = ~mypalette1985(unit_suicides),stroke=TRUE, fillOpacity = 0.9, color="white", 
+              group="1985",
+              highlightOptions = highlightOptions(color = "white", weight = 2,
+                                                  bringToFront = TRUE),
+              label=~mytext1985,
+              labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"), textsize = "13px", direction = "auto")) %>%
+  addPolygons(data=shape1990,
+              weight=1,
+              fillColor = ~mypalette1990(unit_suicides),stroke=TRUE, fillOpacity = 0.9, color="white", 
+              group="1990",
+              highlightOptions = highlightOptions(color = "white", weight = 2,
+                                                  bringToFront = TRUE),
+              label=~mytext1990,
+              labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"), textsize = "13px", direction = "auto")) %>%
+  addPolygons(data=shape1995,
+              weight=1,
+              fillColor = ~mypalette1995(unit_suicides),stroke=TRUE, fillOpacity = 0.9, color="white", 
+              group="1995",
+              highlightOptions = highlightOptions(color = "white", weight = 2,
+                                                  bringToFront = TRUE),
+              label=~mytext1995,
+              labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"), textsize = "13px", direction = "auto")) %>%
+  addPolygons(data=shape2000,
+              weight=1,
+              fillColor = ~mypalette2000(unit_suicides),stroke=TRUE, fillOpacity = 0.9, color="white", 
+              group="2000",
+              highlightOptions = highlightOptions(color = "white", weight = 2,
+                                                  bringToFront = TRUE),
+              label=~mytext2000,
+              labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"), textsize = "13px", direction = "auto")) %>%
+  addPolygons(data=shape2005,
+              weight=1,
+              fillColor = ~mypalette2005(unit_suicides),stroke=TRUE, fillOpacity = 0.9, color="white", 
+              group="2005",
+              highlightOptions = highlightOptions(color = "white", weight = 2,
+                                                  bringToFront = TRUE),
+              label=~mytext2005,
+              labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"), textsize = "13px", direction = "auto")) %>%
+  addPolygons(data=shape2010,
+              weight=1,
+              fillColor = ~mypalette2010(unit_suicides),stroke=TRUE, fillOpacity = 0.9, color="white", 
+              group="2010",
+              highlightOptions = highlightOptions(color = "white", weight = 2,
+                                                  bringToFront = TRUE),
+              label=~mytext2010,
+              labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"), textsize = "13px", direction = "auto")) %>%
+  addPolygons(data=shape2015,
+              weight=1,
+              fillColor = ~mypalette2015(unit_suicides),stroke=TRUE, fillOpacity = 0.9, color="white", 
+              group="2015",
+              highlightOptions = highlightOptions(color = "white", weight = 2,
+                                                  bringToFront = TRUE),
+              label=~mytext2015,
+              labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"), textsize = "13px", direction = "auto")) %>%
+  addPolygons(data=shape2016,
+              weight=1,
+              fillColor = ~mypalette2016(unit_suicides),stroke=TRUE, fillOpacity = 0.9, color="white", 
+              group="2016",
+              highlightOptions = highlightOptions(color = "white", weight = 2,
+                                                  bringToFront = TRUE),
+              label=~mytext2016,
+              labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"), textsize = "13px", direction = "auto")) %>%
+  addLegend( pal=mypalette, values=~unit_suicides, opacity=0.7, title = "Suicides_rate", position = "bottomleft" ) %>% 
+  addLayersControl(
+    baseGroups = c("1985", "1990","1995","2000","2005","2010","2015"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) 
+```
+
+```{r}
+leaflet(shape) %>% 
+  addTiles() %>%
+  addProviderTiles(providers$Esri) %>%
+  setView(10, 0, 2) %>%
+  addPolygons(data=shape1985,
+              weight=1,
+              fillColor = ~mypalette1985(unit_suicides),stroke=TRUE, fillOpacity = 0.9, color="white", 
+              group="all",
+              highlightOptions = highlightOptions(color = "white", weight = 2,
+                                                  bringToFront = TRUE),
+              label=~mytext1985,
+              labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"), textsize = "13px", direction = "auto")) %>% 
+  addLegend( pal=mypalette, values=~unit_suicides, opacity=0.7, title = "Suicides_rate", position = "bottomleft" )
+```
+
+```{r}
+leaflet(shape) %>% 
+  addTiles() %>%
+  addProviderTiles(providers$Esri) %>%
+  setView(10, 0, 2) %>%
+  addPolygons(data=shape2015,
+              weight=1,
+              fillColor = ~mypalette2015(unit_suicides),stroke=TRUE, fillOpacity = 0.9, color="white", 
+              group="all",
+              highlightOptions = highlightOptions(color = "white", weight = 2,
+                                                  bringToFront = TRUE),
+              label=~mytext2015,
+              labelOptions = labelOptions(style = list("font-weight" = "normal", padding = "3px 8px"), textsize = "13px", direction = "auto")) %>% 
+  addLegend( pal=mypalette, values=~unit_suicides, opacity=0.7, title = "Suicides_rate", position = "bottomleft" )
+```
+
+```{r}
+library(htmlwidgets)
+saveWidget(m,file = "interactive_map.html")
+```
+
+
+
+
